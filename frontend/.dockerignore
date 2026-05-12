@@ -1,0 +1,129 @@
+# =======================================================
+# EduCatalog V3 — Frontend .dockerignore
+# -------------------------------------------------------
+# ลด build context ของ Next.js → build เร็วขึ้นมาก
+# (โดยเฉพาะ node_modules ที่ปกติใหญ่ 200MB+)
+# =======================================================
+
+
+# -------------------------------------------------------
+# Secrets — กันเด็ดขาด (กฎ A6)
+# โดยเฉพาะฝั่ง frontend: ตัวแปร NEXT_PUBLIC_* ถูก inline เข้า bundle
+# ถ้า .env หลุดเข้า image → secret โผล่ใน JS ที่ browser ดาวน์โหลด
+# -------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+
+# -------------------------------------------------------
+# node_modules — ห้าม copy จาก host เด็ดขาด
+# 1. ขนาดใหญ่มาก (เพิ่ม build context หลายนาที)
+# 2. binary บางตัว (sharp, esbuild) compile ตาม OS host
+#    ถ้า host = Windows แต่ image = alpine จะ runtime error
+# Dockerfile จะ npm install ใหม่ภายใน container เอง
+# -------------------------------------------------------
+node_modules
+**/node_modules
+
+
+# -------------------------------------------------------
+# Next.js build output — ต้อง build ใหม่ใน container
+# .next ของ host อาจเป็นของ dev build ที่ไม่ optimize
+# Dockerfile.prod จะรัน `npm run build` ใน stage builder เอง
+# -------------------------------------------------------
+.next
+.next/
+out
+out/
+.turbo
+
+
+# -------------------------------------------------------
+# Tests & Playwright report — ไม่ deploy ไป prod
+# playwright-report มีขนาดใหญ่ (screenshot + video) ไม่จำเป็นใน image
+# (กฎ E3 — E2E test รันแยกจาก CI ไม่ใช่ใน container)
+# -------------------------------------------------------
+tests
+tests/
+playwright-report
+playwright-report/
+test-results
+test-results/
+playwright/.cache
+
+
+# -------------------------------------------------------
+# Git metadata — ไม่ใช้ใน runtime
+# -------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+
+
+# -------------------------------------------------------
+# Docs — อ่านจาก repo ก็พอ
+# -------------------------------------------------------
+README.md
+README.rst
+docs
+docs/
+
+
+# -------------------------------------------------------
+# IDE & Editor — config เฉพาะเครื่อง dev
+# -------------------------------------------------------
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+
+# -------------------------------------------------------
+# Logs — รันใน container ใช้ stdout (กฎ H4)
+# ไม่มี log file บน disk ตอน prod
+# -------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log
+
+
+# -------------------------------------------------------
+# Docker files เอง — ไม่ต้อง copy เข้า image
+# -------------------------------------------------------
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+
+# -------------------------------------------------------
+# Misc — cache & coverage
+# -------------------------------------------------------
+.cache
+.parcel-cache
+.eslintcache
+coverage
+.nyc_output
+
+
+# -------------------------------------------------------
+# Lock files อื่นๆ — เก็บไว้แค่ package-lock.json
+# กัน yarn.lock / pnpm-lock.yaml ปนเปื้อนถ้าทีมเผลอใช้ tool ต่างกัน
+# -------------------------------------------------------
+yarn.lock
+pnpm-lock.yaml
+
+
+# -------------------------------------------------------
+# CI / build artifacts
+# -------------------------------------------------------
+.github
+.gitlab-ci.yml
+build
+dist
+*.tsbuildinfo

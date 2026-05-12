@@ -1,0 +1,74 @@
+# =======================================================
+# EduCatalog V3 — Frontend Dockerfile (PRODUCTION)
+# -------------------------------------------------------
+# Multi-stage build + Next.js standalone output
+# image สุดท้ายเล็กมาก เพราะมีเฉพาะ node + ไฟล์ที่จำเป็น
+#
+# ⚠️ ต้องตั้งใน next.config.js:
+#     module.exports = { output: 'standalone' }
+# =======================================================
+
+
+# -------------------------------------------------------
+# Stage 1: deps — ติดตั้ง dependencies (lock to package-lock.json)
+# -------------------------------------------------------
+FROM node:20-alpine AS deps
+
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+# npm ci = clean install ตรงตาม lock file (ห้ามอัปเดต)
+RUN npm ci
+
+
+# -------------------------------------------------------
+# Stage 2: builder — build production bundle
+# -------------------------------------------------------
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# reuse node_modules จาก stage deps
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production
+
+# build จะสร้าง .next/standalone (รวม minimal node_modules แล้ว)
+RUN npm run build
+
+
+# -------------------------------------------------------
+# Stage 3: runtime — image สุดท้าย (ขนาดเล็กที่สุด)
+# -------------------------------------------------------
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# non-root user เพื่อ security
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+# -------------------------------------------------------
+# Copy เฉพาะที่จำเป็นจาก builder
+#   .next/standalone/  → server.js + minimal node_modules
+#   .next/static/      → static assets ที่ build ออกมา
+#   public/            → ไฟล์ static ของ developer
+# -------------------------------------------------------
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+USER nextjs
+
+EXPOSE 3000
+
+# server.js ถูก generate ใน .next/standalone โดย Next.js เอง
+CMD ["node", "server.js"]

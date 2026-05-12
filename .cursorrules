@@ -1,0 +1,451 @@
+# EduCatalog V3 — Cursor Rules
+# อ่านทุกข้อก่อนเขียน code ทุกครั้ง
+
+---
+
+## PROJECT OVERVIEW
+
+ระบบ Data Catalog การศึกษาไทย
+- Backend:  Python 3.12 + FastAPI + SQLAlchemy 2.0 + Alembic
+- Frontend: Next.js 14 + Tailwind + shadcn/ui
+- DB:       PostgreSQL 16 + Redis 7 + Elasticsearch 8
+- Storage:  MinIO
+- Queue:    Celery + Redis
+- Email:    Resend
+- Repo:     Monorepo (backend/ + frontend/)
+
+---
+
+## FOLDER STRUCTURE
+
+backend/
+  api/v1/       → router เท่านั้น ห้าม business logic
+  core/         → config, db, redis, security, errors
+  models/       → SQLAlchemy models
+  schemas/      → Pydantic request/response
+  services/     → business logic ทั้งหมด
+  repositories/ → database queries
+  tasks/        → Celery background jobs
+  utils/        → helper functions
+  middleware/   → rate limit, audit, maintenance
+  tests/        → pytest integration tests
+
+frontend/
+  app/          → Next.js App Router pages
+  components/   → React components แยกตาม feature
+  hooks/        → React Query hooks
+  stores/       → Zustand stores
+  lib/          → api client, utils
+  types/        → TypeScript interfaces
+
+---
+
+## LAYER RULES (ห้ามละเมิด)
+
+router      → รับ request, validate input, เรียก service, return response
+service     → business logic, orchestrate repositories
+repository  → database queries เท่านั้น
+
+ห้าม query DB ใน router โดยตรง
+ห้าม business logic ใน repository
+ห้าม import repository ใน router โดยตรง
+
+---
+
+## กฎ A — กฎเหล็ก (ห้ามละเมิดเด็ดขาด)
+
+A1. Field ใหม่ → nullable/optional เสมอ
+    ถ้าต้อง NOT NULL → ทำ migration แยก 3 ขั้นตอน:
+      deploy 1: add column nullable
+      deploy 2: backfill data + code รองรับทั้งคู่
+      deploy 3: set NOT NULL
+
+A2. เพิ่ม feature ใหม่ → สร้าง file ใหม่เสมอ
+    ห้ามแก้ file เดิมที่ทำงานอยู่แล้ว
+
+A3. API endpoint เดิม → ห้ามเปลี่ยน URL, method, response format
+    ถ้าต้องเปลี่ยน → สร้าง /v2 แทน
+
+A4. ห้าม push ถ้า test fail
+
+A5. ห้าม hardcode ค่าใดๆ ใน code
+    ทุกค่าต้องอยู่ใน core/config.py หรือ .env
+
+A6. ห้าม commit .env หรือ secrets
+    มีแต่ .env.example เท่านั้น
+
+---
+
+## กฎ B — Database
+
+B1. ทุก DELETE → soft delete (deleted_at = NOW())
+    ทุก query → WHERE deleted_at IS NULL
+
+B2. ห้าม N+1 query
+    list endpoint ใช้ selectinload หรือ joinedload เสมอ
+
+B3. Index ทุก column ที่ใช้ filter/sort/search
+    สร้างพร้อม migration ไม่ใช่เพิ่มทีหลัง
+    ตัวอย่าง: datasets.status, datasets.category_id, datasets.published_at
+
+B4. ทุก Alembic migration ต้องมี downgrade()
+    ห้ามปล่อยว่าง
+
+B5. ห้าม rename/drop column ทันที → ต้องทำ 3 deploy เท่านั้น
+
+B6. Counter → Atomic SQL เสมอ
+    ✅  SET download_count = download_count + 1
+    ❌  อ่านค่า แล้ว +1 แล้วเขียนกลับ
+
+B7. ทุก operation ที่เกี่ยวกันหลายตาราง → async with db.begin()
+    ถ้า step ใดล้มเหลว → rollback ทั้งหมด
+
+B8. DB Constraint ทุก field สำคัญ
+    CHECK, NOT NULL, UNIQUE ใน migration เสมอ
+
+B9. ตรวจ query performance ด้วย EXPLAIN ANALYZE
+    ก่อน deploy endpoint ใหม่ที่เกี่ยวกับ list/search
+
+---
+
+## กฎ C — API & Response Format
+
+C1. เขียน API_CONTRACT_*.md ใน docs/ ก่อน code ทุก feature
+
+C2. Success response format:
+    {
+      "data": {...}
+    }
+
+    List response format:
+    {
+      "data": [...],
+      "meta": { "page": 1, "total": 100, "limit": 20 }
+    }
+
+C3. Error response format (ใช้ errors.py enum เสมอ):
+    {
+      "error": "DATASET_NOT_FOUND",
+      "code": 404,
+      "detail": "ไม่พบ dataset ที่ระบุ"
+    }
+    ห้ามพิมพ์ string error เองใน router
+    ห้าม expose stack trace บน production (DEBUG=false)
+
+C4. Parameterized query เท่านั้น
+    ห้าม string concatenation SQL ทุกกรณี
+
+C5. Cache Redis ทุก read-heavy endpoint:
+    /search              → 5 นาที   (CACHE_TTL_SEARCH)
+    /datasets/:id        → 10 นาที  (CACHE_TTL_DATASET)
+    /datasets/:id/schema → 30 นาที  (CACHE_TTL_SCHEMA)
+    /feature-flags       → 60 วินาที (CACHE_TTL_FLAGS)
+
+C6. Pagination ทุก list endpoint
+    default limit: 20, max limit: 100
+    ห้าม query ทั้งหมดโดยไม่มี limit
+
+C7. Soft delete ทุก table
+    ทุก GET list → WHERE deleted_at IS NULL อัตโนมัติ
+
+---
+
+## กฎ D — Security
+
+D1. Validate input ทั้ง frontend (Zod) + backend (Pydantic)
+    อย่าเชื่อ frontend อย่างเดียว
+
+D2. JWT: access token 15 นาที, refresh token 7 วัน
+    algorithm: HS256
+
+D3. Password → bcrypt เท่านั้น
+    ห้ามเก็บ plaintext ทุกกรณี
+
+D4. HTTPS เท่านั้น
+    redirect HTTP → HTTPS ที่ Nginx
+
+D5. Security headers ทุก response:
+    Strict-Transport-Security
+    X-Frame-Options: DENY
+    X-Content-Type-Options: nosniff
+    Content-Security-Policy
+
+D6. File upload pipeline (ต้องครบทุกขั้น ตามลำดับ):
+    1. size check (max 100MB)
+    2. format check (csv/excel/json เท่านั้น)
+    3. ClamAV scan
+    4. เก็บใน MinIO (temp bucket ก่อน)
+    5. ย้ายไป datasets bucket หลังผ่านทุกขั้น
+
+D7. Sensitive fields → encrypt ก่อนเก็บ DB
+    ใช้ core/crypto.py (Fernet) เสมอ
+    fields: phone, national_id
+
+D8. ก่อนแสดงผล → mask PII ด้วย utils/masking.py
+    phone: 081***5678
+    email: us**@example.com
+    national_id: 1-234***-*****-*
+
+D9. ก่อน publish dataset → scan หา PII
+    ใช้ utils/pii_scanner.py
+    ตรวจ: เลขบัตรประชาชน 13 หลัก, เบอร์โทรไทย
+
+D10. Rate limit ทุก endpoint:
+     API:      100 req/นาที/IP
+     Download: 20 files/ชั่วโมง/IP, max 500MB/ชั่วโมง/IP
+     เกิน → HTTP 429 + Retry-After header
+
+---
+
+## กฎ E — Testing
+
+E1. ทุก endpoint → integration test อย่างน้อย:
+    - happy path
+    - error case (404, 422, 403)
+    - edge case ที่สำคัญ
+
+E2. Backend test coverage เป้า ≥ 70%
+    รัน: pytest --cov=. --cov-report=term-missing
+
+E3. E2E Playwright ครอบคลุม 5 หน้าหลัก:
+    tests/e2e/login.spec.ts
+    tests/e2e/search.spec.ts
+    tests/e2e/detail.spec.ts
+    tests/e2e/upload.spec.ts
+    tests/e2e/admin.spec.ts
+
+E4. ทุก bug → เขียน regression test ก่อน fix เสมอ
+
+E5. ก่อน merge → รัน smoke test ครบ 3 role:
+    visitor:  ค้นหา → ดู detail → download → ติดต่อผู้เผยแพร่
+    agency:   login → upload → กรอก data dictionary → submit
+    admin:    approve → manage users → audit log
+
+---
+
+## กฎ F — Frontend State Management
+
+F1. Server state ทั้งหมด → React Query
+    useQuery, useMutation, useInfiniteQuery
+    ห้ามใช้ useState เก็บ API data
+
+F2. Client state → Zustand เท่านั้น
+    authStore: user session, token
+    uiStore:   sidebar open/close, theme preferences
+
+F3. ห้ามผสม:
+    ❌ Zustand เก็บ server data
+    ❌ useState เก็บ API response
+
+F4. ทุก async component → Loading skeleton ขณะโหลด
+    ใช้ components/shared/LoadingSkeleton.tsx
+    ห้ามปล่อยหน้าว่าง
+
+F5. ทุก API error → แสดง toast หรือ inline message
+    ใช้ components/shared/Toast.tsx
+    ห้ามปล่อย error หายเงียบๆ
+
+F6. Cache invalidation ต้องชัดเจน:
+    หลัง upload dataset  → invalidate ['my-datasets']
+    หลัง approve dataset → invalidate ['datasets', 'pending']
+    หลัง update profile  → invalidate ['me']
+
+F7. ทุก form → validate ด้วย Zod + react-hook-form
+    ห้าม validate เอง manual
+
+---
+
+## กฎ G — Design System
+
+G1. Font: Kanit เท่านั้น
+    import จาก Google Fonts ใน layout.tsx
+
+G2. Colors (ใช้ CSS variables เสมอ):
+    --color-primary:         #006600
+    --color-primary-dark:    #004d00
+    --color-primary-light:   #e6f4e6
+    --color-accent:          #FFFF00
+    --color-accent-dark:     #cccc00
+    --color-text:            #1e293b
+    --color-text-secondary:  #64748b
+    --color-bg:              #f8fafc
+    --color-surface:         #ffffff
+    --color-border:          #e2e8f0
+    --color-error:           #dc2626
+    --color-warning:         #ca8a04
+
+G3. Border radius: 0px ทุกที่
+    ห้ามใส่ rounded-* ใน Tailwind
+    ห้ามใส่ border-radius ใน CSS
+
+G4. Padding (ใช้ CSS variables):
+    --pad-btn-sm:  8px 14px
+    --pad-btn:     10px 20px
+    --pad-btn-lg:  14px 28px
+    --pad-input:   10px 12px
+    --pad-card:    16px
+    --pad-card-lg: 24px
+    --pad-modal:   24px
+
+G5. ใช้ CSS variables จาก globals.css เสมอ
+    ห้าม hardcode สี, spacing, font-size ใน component
+    ห้ามใช้ arbitrary values ใน Tailwind เช่น text-[#006600]
+
+G6. Typography:
+    H1: 32px weight 700
+    H2: 24px weight 600
+    H3: 18px weight 600
+    H4: 16px weight 600
+    Body: 14px weight 400 line-height 1.7
+    SM: 13px
+    XS: 12px
+
+---
+
+## กฎ H — Code Quality
+
+H1. Comment ภาษาไทย อธิบาย 'ทำไม' ไม่ใช่ 'ทำอะไร'
+    # ใช้ selectinload เพราะถ้า joinedload จะ duplicate rows เมื่อ relation เป็น 1:M
+    ไม่ใช่:
+    # query datasets จาก database
+
+H2. ตั้งชื่อ file/function/variable ภาษาอังกฤษ ชัดเจน สื่อความหมาย
+    ✅ get_published_datasets_by_category()
+    ❌ get_data(), process(), handle()
+
+H3. ทุก service function → type hint ครบ
+    async def approve_dataset(
+        dataset_id: UUID,
+        admin_id: UUID,
+        db: AsyncSession
+    ) -> DatasetSchema:
+
+H4. ห้าม print() ใน production code
+    ใช้ logging (JSON format) เท่านั้น
+
+H5. ห้าม log PII ใน production:
+    ❌ log email, ชื่อ, เบอร์, password, token
+    ✅ log user_id, dataset_id, ip_address
+
+H6. Log format มาตรฐาน JSON:
+    {
+      "timestamp": "...",
+      "level": "INFO",
+      "event": "dataset.download",
+      "user_id": "uuid",
+      "dataset_id": "uuid",
+      "ip": "x.x.x.x"
+    }
+
+---
+
+## กฎ I — Scope Control
+
+I1. ทุกกลุ่มงาน → deploy จริงบน server ก่อนไปกลุ่มถัดไป
+    demo flow ครบก่อนเสมอ
+
+I2. Feature นอก scope V1 → จดใน docs/PHASE2_LIST.md
+    ห้ามทำตอนนี้ต่อให้ดูง่ายหรือใช้เวลาน้อย
+
+I3. ห้าม Cursor เพิ่ม:
+    - feature ที่ไม่ได้กำหนดใน scope
+    - dependency ใหม่ที่ไม่ได้อยู่ใน tech stack
+    - table หรือ column ที่ไม่ได้อยู่ใน ERD
+
+I4. ล่าช้า > 30% → หยุดแล้ว review scope ก่อนเสมอ
+
+---
+
+## FEATURE FLAGS
+
+เช็คก่อนทำงานทุก feature หลัก
+ใช้: await is_enabled("flag_key", redis, db)  # core/feature_flags.py
+
+flags ทั้งหมด:
+  download_enabled     → ก่อน serve download
+  registration_open    → ก่อน register user ใหม่
+  agency_registration  → ก่อน register agency ใหม่
+  search_enabled       → ก่อน query Elasticsearch
+  preview_enabled      → ก่อน return preview rows
+  contact_owner        → ก่อนแสดงปุ่ม + ก่อนส่ง email
+  ckan_sync_enabled    → ก่อน sync ไป data.go.th
+  maintenance_mode     → redirect ทุกหน้า ยกเว้น /admin + /feature-flags
+
+frontend เรียก GET /feature-flags ครั้งแรก cache ไว้ 60 วินาที
+ใช้ hooks/useFeatureFlags.ts
+
+---
+
+## CONCURRENCY
+
+ทุก counter → Atomic SQL:
+  download_count = download_count + 1
+
+ทุก critical update → Optimistic Locking:
+  WHERE id = :id AND version = :current_version
+  ถ้า rows affected = 0 → raise CONFLICT error
+
+Connection Pool:
+  pool_size=20, max_overflow=10, pool_timeout=30
+
+---
+
+## DATA PROTECTION
+
+Sensitive data pipeline:
+  รับข้อมูล → validate → encrypt → เก็บ DB
+  ดึงจาก DB → decrypt → mask → แสดงผล
+
+PII ที่ต้อง encrypt: phone, national_id
+PII ที่ต้อง mask ก่อนแสดง: phone, email, national_id
+
+Dataset file pipeline:
+  upload → temp MinIO → ClamAV scan → quality score
+  → data dictionary → agency submit → admin approve
+  → publish MinIO → Elasticsearch index
+
+---
+
+## ENVIRONMENT
+
+อ่าน config จาก core/config.py เสมอ:
+  from core.config import settings
+
+ห้าม import os.environ โดยตรงใน business logic
+ห้าม hardcode URL, key, หรือค่า config ใน code
+
+---
+
+## BRANCH STRATEGY
+
+main      ← production (auto deploy เมื่อ merge)
+develop   ← staging (integration test)
+feature/* ← งานแต่ละชิ้น
+
+flow: feature/* → develop (test ผ่าน) → main (deploy)
+
+CI pipeline: test → build → migrate → deploy → smoke test
+
+---
+
+## DEPLOY ORDER (ต้องทำตามลำดับ)
+
+กลุ่ม 0: DevOps Foundation    → Docker + CI/CD + SSL
+กลุ่ม 1: Design + Scaffold    → Layout + Design System + Auth Guard
+กลุ่ม 2: Auth                 → Login + Register + Forgot Password
+กลุ่ม 3: Dataset Upload       → Upload + Metadata + Data Dictionary
+กลุ่ม 4: Approval + Detail    → Workflow + Preview + Schema tab
+กลุ่ม 5: Search + Download    → Elasticsearch + Thai NLP + Rate Limit
+กลุ่ม 6: Admin + Dashboard    → Admin Panel + Stats + Version Control
+กลุ่ม 7: Public API + PDPA    → Swagger + CKAN Sync + Cookie Consent
+กลุ่ม 8: Production Hardening → Backup + Monitoring + Security Audit
+
+แต่ละกลุ่ม: code → test → deploy → demo → ไปกลุ่มถัดไป
+
+---
+
+## CURRENT PHASE
+
+Phase 1 (V1) — กำลังทำอยู่
+ดูรายละเอียดแผนงานทั้งหมดใน docs/
+ดู feature ที่ยังไม่ทำใน docs/PHASE2_LIST.md

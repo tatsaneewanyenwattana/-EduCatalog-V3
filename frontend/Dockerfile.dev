@@ -1,0 +1,36 @@
+# =======================================================
+# EduCatalog V3 — Frontend Dockerfile (DEVELOPMENT)
+# -------------------------------------------------------
+# Next.js 14 + live reload (HMR)
+# source code ถูก mount จาก host ผ่าน docker-compose
+# =======================================================
+
+FROM node:20-alpine
+
+# alpine มี wget แล้ว (BusyBox) ใช้ใน docker healthcheck ได้เลย
+# ติดตั้ง libc6-compat เพราะ Next.js บางครั้งต้องการ
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# -------------------------------------------------------
+# Install deps
+# copy package.json + lock ก่อน เพื่อ leverage docker layer cache
+# (rebuild เฉพาะเมื่อ dependencies เปลี่ยน)
+# -------------------------------------------------------
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# -------------------------------------------------------
+# Copy source code
+# หมายเหตุ: ใน dev ถูก override ด้วย bind mount จาก docker-compose
+#         (./frontend:/app + named volume /app/node_modules /app/.next)
+# -------------------------------------------------------
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=development
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

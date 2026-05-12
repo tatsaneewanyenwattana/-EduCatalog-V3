@@ -1,0 +1,69 @@
+# =======================================================
+# EduCatalog V3 — Backend Dockerfile (PRODUCTION)
+# -------------------------------------------------------
+# Multi-stage build เพื่อให้ image ขนาดเล็ก + ปลอดภัย
+#   stage 1 (builder): มี gcc + libpq-dev สำหรับ compile
+#   stage 2 (runtime): มีแค่ libpq5 + python — ไม่มี toolchain
+# =======================================================
+
+
+# -------------------------------------------------------
+# Stage 1: builder — ติดตั้ง dependencies ลง venv
+# -------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+# build-time only — ไม่ติดไป stage 2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ใช้ venv ที่ /opt/venv → copy ทั้ง folder ไป stage 2 ได้สะดวก
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# -------------------------------------------------------
+# Stage 2: runtime — image สุดท้ายที่ deploy
+# -------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    ENV=production \
+    DEBUG=false
+
+# runtime deps เท่านั้น
+#   libpq5 → shared lib สำหรับ asyncpg ตอนรัน (ไม่ต้องการ libpq-dev)
+#   curl   → docker healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 1001 app \
+    && useradd --system --uid 1001 --gid app --create-home --home-dir /home/app app
+
+# copy venv ที่ติดตั้งแล้วจาก stage 1
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+COPY --chown=app:app . .
+
+# รันด้วย non-root user เพื่อ security
+USER app
+
+EXPOSE 8000
+
+# 4 workers — ไม่มี --reload
+# (จำนวน workers ที่เหมาะสม = (2 * CPU cores) + 1, ปรับตามเครื่อง prod)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-config", "logging.json"]

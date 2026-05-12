@@ -1,0 +1,52 @@
+# =======================================================
+# EduCatalog V3 — Backend Dockerfile (DEVELOPMENT)
+# -------------------------------------------------------
+# ใช้ร่วมกัน 4 service: backend, celery_worker, celery_beat, flower
+# command ต่างกันถูกกำหนดที่ docker-compose.yml
+# =======================================================
+
+FROM python:3.12-slim
+
+# -------------------------------------------------------
+# Python runtime config
+#   PYTHONUNBUFFERED=1     → log ออก stdout ทันที (ไม่ buffer)
+#   PYTHONDONTWRITEBYTECODE=1 → ไม่สร้าง .pyc ลง disk
+# -------------------------------------------------------
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+WORKDIR /app
+
+# -------------------------------------------------------
+# System packages
+#   gcc, libpq-dev  → compile asyncpg + cryptography
+#   curl            → ใช้ใน docker healthcheck (GET /health)
+# -------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        libpq-dev \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------------
+# Install Python deps
+# copy requirements.txt ก่อน เพื่อใช้ docker layer cache
+# (จะ rebuild เฉพาะเมื่อ requirements เปลี่ยน)
+# -------------------------------------------------------
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# -------------------------------------------------------
+# Copy source code
+# หมายเหตุ: ใน dev ถูก override ด้วย bind mount ใน docker-compose
+#         (./backend:/app) — COPY นี้สำหรับกรณีรัน image แบบ standalone
+# -------------------------------------------------------
+COPY . .
+
+EXPOSE 8000
+
+# default command — override ได้ที่ compose สำหรับ celery worker/beat/flower
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

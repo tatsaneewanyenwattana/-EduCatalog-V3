@@ -1,0 +1,388 @@
+# =======================================================
+# EduCatalog V3 — Docker Compose (DEVELOPMENT)
+# -------------------------------------------------------
+# วิธีรัน:
+#   cp backend/.env .env
+#   docker compose up -d
+#
+# หมายเหตุ:
+#   - ทุก service อยู่ใน network เดียวกัน: educatalog_net
+#   - service-to-service: ใช้ "ชื่อ service" เป็น hostname (postgres, redis, ...)
+#   - host-to-service:    เข้าผ่าน localhost + port ที่ map ไว้
+#   - ค่า config อ่านจาก .env ที่ root (copy มาจาก backend/.env)
+# =======================================================
+
+name: educatalog
+
+
+# -------------------------------------------------------
+# YAML anchor — แชร์ config ของ backend image ทั้ง 4 service
+# (backend, celery_worker, celery_beat, flower)
+# เปลี่ยนที่เดียว = เปลี่ยนพร้อมกัน
+# -------------------------------------------------------
+# สำคัญ: build อยู่ที่ service "backend" ตัวเดียว
+# service อื่นใช้ image: educatalog-backend:dev ที่ build เสร็จแล้ว
+# -------------------------------------------------------
+x-backend-base: &backend-base
+  image: educatalog-backend:dev
+  env_file:
+    - ./backend/.env
+  # override host ที่ชี้ไป localhost ใน .env ให้ใช้ชื่อ service ภายใน docker network
+  environment:
+    POSTGRES_HOST: postgres
+    REDIS_HOST: redis
+    ES_HOST: elasticsearch
+    MINIO_ENDPOINT: minio:9000
+    CLAMAV_HOST: clamav
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+    CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
+  volumes:
+    - ./backend:/app
+  networks:
+    - educatalog_net
+  restart: unless-stopped
+
+
+services:
+
+  # =====================================================
+  # PostgreSQL 16 — primary database
+  # =====================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: educatalog_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # UTF-8 encoding รองรับภาษาไทย
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # Redis 7 — cache + rate limit + celery broker
+  # db 0 = cache, db 1 = celery broker, db 2 = celery result
+  # =====================================================
+  redis:
+    image: redis:7-alpine
+    container_name: educatalog_redis
+    # บังคับใส่ password + เปิด AOF เพื่อ persist data ใน dev
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+    environment:
+      # ส่ง REDIS_PASSWORD เข้า container เพื่อใช้ใน healthcheck
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      # $$ escape เป็น $ ใน container shell — กัน compose interpolate ก่อน
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # Elasticsearch 8.13 — full-text search dataset
+  # ปิด xpack security ใน dev เพื่อ setup ง่าย
+  # =====================================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: educatalog_elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      bootstrap.memory_lock: "true"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -sf http://localhost:9200/_cluster/health | grep -E 'green|yellow' > /dev/null"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # MinIO — S3 compatible object storage
+  # console:9001 | api:9000
+  # =====================================================
+  minio:
+    image: minio/minio:latest
+    container_name: educatalog_minio
+    command: server /data --console-address ":9001"
+    environment:
+      # MinIO ต้องการชื่อ var เป็น MINIO_ROOT_USER/PASSWORD — map จาก .env
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # ClamAV — virus scan ก่อน publish (กฎ D6 ขั้น 3)
+  # ครั้งแรก start ใช้เวลานาน เพราะ download virus signatures
+  # =====================================================
+  clamav:
+    image: clamav/clamav:stable
+    container_name: educatalog_clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      # ส่ง PING command ผ่าน TCP socket — ClamAV ตอบ PONG เมื่อพร้อม
+      test: ["CMD-SHELL", "echo 'PING' | nc -w 2 localhost 3310 | grep -q 'PONG'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # start_period สูงเพราะรอ download signature database (freshclam) ครั้งแรก
+      start_period: 600s
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # Backend — FastAPI (live reload)
+  # build เฉพาะที่นี่ — service อื่นใช้ image ที่ build แล้ว
+  # =====================================================
+  backend:
+    <<: *backend-base
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: educatalog_backend
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+
+  # =====================================================
+  # Celery Worker — async tasks (email, scan, quality)
+  # =====================================================
+  celery_worker:
+    <<: *backend-base
+    container_name: educatalog_celery_worker
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
+  # =====================================================
+  # Celery Beat — periodic task scheduler (cron jobs)
+  # =====================================================
+  celery_beat:
+    <<: *backend-base
+    container_name: educatalog_celery_beat
+    command: celery -A tasks.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    healthcheck:
+      # beat ไม่มี healthcheck ในตัว — ตรวจว่า process ยังรันอยู่
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+
+  # =====================================================
+  # Flower — Celery monitoring UI (http://localhost:5555)
+  # =====================================================
+  flower:
+    <<: *backend-base
+    container_name: educatalog_flower
+    command: celery -A tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5555/healthcheck || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+
+
+  # =====================================================
+  # Frontend — Next.js 14 (live reload)
+  # NEXT_PUBLIC_API_URL ต้องเป็น URL ที่ browser เรียกได้
+  # = localhost:8000 (ไม่ใช่ backend:8000 ซึ่งใช้ภายใน docker เท่านั้น)
+  # =====================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    image: educatalog-frontend:dev
+    container_name: educatalog_frontend
+    command: npm run dev
+    env_file:
+      # required: false → ถ้ายังไม่ได้สร้าง .env ก็ start ได้
+      - path: ./frontend/.env
+        required: false
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      # ป้องกัน node_modules จาก host มาทับใน container
+      - /app/node_modules
+      - /app/.next
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+  # =====================================================
+  # Nginx — reverse proxy (entry point ของ dev environment)
+  # routing:
+  #   /api/*    → backend:8000
+  #   /health   → backend:8000
+  #   /minio/*  → minio:9001
+  #   /flower/* → flower:5555
+  #   /*        → frontend:3000
+  # =====================================================
+  nginx:
+    image: nginx:alpine
+    container_name: educatalog_nginx
+    ports:
+      # ถ้ามีบริการอื่นใช้ port 80 อยู่ ให้เปลี่ยนเป็น "8080:80"
+      - "80:80"
+    volumes:
+      # :ro กัน container แก้ไฟล์ config โดยไม่ตั้งใจ
+      - ./nginx/dev.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - educatalog_net
+    restart: unless-stopped
+
+
+# -------------------------------------------------------
+# Volumes — persistent data (เก็บถาวรระหว่าง dev session)
+# -------------------------------------------------------
+volumes:
+  postgres_data:
+    name: educatalog_postgres_data
+  redis_data:
+    name: educatalog_redis_data
+  es_data:
+    name: educatalog_es_data
+  minio_data:
+    name: educatalog_minio_data
+  clamav_data:
+    name: educatalog_clamav_data
+
+
+# -------------------------------------------------------
+# Network — ทุก service สื่อสารกันผ่าน network นี้
+# -------------------------------------------------------
+networks:
+  educatalog_net:
+    name: educatalog_net
+    driver: bridge
