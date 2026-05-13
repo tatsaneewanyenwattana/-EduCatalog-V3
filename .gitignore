@@ -25,6 +25,9 @@ frontend/.turbo/
 frontend/playwright-report/
 frontend/test-results/
 
+# TypeScript incremental build (tsc --incremental)
+*.tsbuildinfo
+
 # Node root (minimal / lock only)
 node_modules/
 
