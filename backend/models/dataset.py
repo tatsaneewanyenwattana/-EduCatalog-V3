@@ -57,7 +57,7 @@ class Dataset(Base, TimestampMixin, SoftDeleteMixin):
     slug: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[DatasetStatus] = mapped_column(
-        SQLEnum(DatasetStatus, name="dataset_status", native_enum=False, length=32),
+        SQLEnum(DatasetStatus, name="dataset_status", native_enum=True),
         nullable=False,
         default=DatasetStatus.draft,
     )

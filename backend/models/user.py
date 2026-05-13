@@ -38,12 +38,12 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        SQLEnum(UserRole, name="user_role", native_enum=False, length=32),
+        SQLEnum(UserRole, name="user_role", native_enum=True),
         nullable=False,
         default=UserRole.visitor,
     )
     status: Mapped[UserStatus] = mapped_column(
-        SQLEnum(UserStatus, name="user_status", native_enum=False, length=32),
+        SQLEnum(UserStatus, name="user_status", native_enum=True),
         nullable=False,
         default=UserStatus.pending,
     )

@@ -43,7 +43,7 @@ class DatasetVersion(Base, TimestampMixin, SoftDeleteMixin):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     file_format: Mapped[FileFormat] = mapped_column(
-        SQLEnum(FileFormat, name="file_format", native_enum=False, length=16),
+        SQLEnum(FileFormat, name="file_format", native_enum=True),
         nullable=False,
     )
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -51,7 +51,7 @@ class DatasetVersion(Base, TimestampMixin, SoftDeleteMixin):
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scan_status: Mapped[ScanStatus] = mapped_column(
-        SQLEnum(ScanStatus, name="scan_status", native_enum=False, length=32),
+        SQLEnum(ScanStatus, name="scan_status", native_enum=True),
         nullable=False,
         default=ScanStatus.pending,
     )

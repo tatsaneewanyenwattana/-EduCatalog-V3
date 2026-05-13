@@ -33,7 +33,7 @@ class DataDictionaryColumn(Base, TimestampMixin, SoftDeleteMixin):
     column_key: Mapped[str] = mapped_column(String(128), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     data_type: Mapped[ColumnDataType] = mapped_column(
-        SQLEnum(ColumnDataType, name="column_data_type", native_enum=False, length=32),
+        SQLEnum(ColumnDataType, name="column_data_type", native_enum=True),
         nullable=False,
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

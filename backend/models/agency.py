@@ -37,11 +37,11 @@ class Agency(Base, TimestampMixin, SoftDeleteMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     type: Mapped[AgencyType] = mapped_column(
-        SQLEnum(AgencyType, name="agency_type", native_enum=False, length=32),
+        SQLEnum(AgencyType, name="agency_type", native_enum=True),
         nullable=False,
     )
     status: Mapped[AgencyStatus] = mapped_column(
-        SQLEnum(AgencyStatus, name="agency_status", native_enum=False, length=32),
+        SQLEnum(AgencyStatus, name="agency_status", native_enum=True),
         nullable=False,
         default=AgencyStatus.active,
     )

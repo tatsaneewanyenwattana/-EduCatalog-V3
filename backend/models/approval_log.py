@@ -39,7 +39,7 @@ class ApprovalLog(Base, TimestampMixin, SoftDeleteMixin):
         nullable=False,
     )
     action: Mapped[ApprovalAction] = mapped_column(
-        SQLEnum(ApprovalAction, name="approval_action", native_enum=False, length=32),
+        SQLEnum(ApprovalAction, name="approval_action", native_enum=True),
         nullable=False,
     )
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
