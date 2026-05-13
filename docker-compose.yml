@@ -1,15 +1,22 @@
 # =======================================================
 # EduCatalog V3 — Docker Compose (DEVELOPMENT)
 # -------------------------------------------------------
-# วิธีรัน:
-#   cp backend/.env .env
-#   docker compose up -d
+# วิธีรัน (แหล่ง env เดียว — ห้ามให้ root .env กับ backend/.env ค่าไม่ตรงกัน):
+#
+#   แนะนำ (Compose ใช้ backend/.env ทั้งในการแทนค่า ${...} และ env_file):
+#     docker compose --env-file backend/.env up -d
+#     หรือ Windows: .\scripts\compose-with-backend-env.ps1 up -d
+#
+#   แบบเดิม (ต้อง sync ให้เหมือนกันทุกครั้งถ้ามีไฟล์สองที่):
+#     copy backend\\.env .env    # จากนั้น docker compose up -d
+#     Compose โหลดแค่ .env ที่ root เพื่อ ${POSTGRES_USER} / ${DATABASE_URL} ในไฟล์นี้
+#
+#   รัน Python/uvicorn บน host ที่ backend/ อ่าน backend/.env อยู่แล้ว (core/config.py)
 #
 # หมายเหตุ:
 #   - ทุก service อยู่ใน network เดียวกัน: educatalog_net
 #   - service-to-service: ใช้ "ชื่อ service" เป็น hostname (postgres, redis, ...)
 #   - host-to-service:    เข้าผ่าน localhost + port ที่ map ไว้
-#   - ค่า config อ่านจาก .env ที่ root (copy มาจาก backend/.env)
 # =======================================================
 
 name: educatalog
@@ -316,7 +323,13 @@ services:
       - /app/node_modules
       - /app/.next
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      # เชื่อมจากคอนเทนเนอร์อื่นได้ต่อเมื่อ Next ฟัง 0.0.0.0 (ดู frontend/package.json dev script)
+      # ถ้า GET / ยังผิดปกติ แบบเป็นครั้งแรกหลังอัปเดตซอร์ส: คืนค่า volume ว่างให้ฟร้อนเทน (ดูด้านท้ายบล็อกนี้)
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\"",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -348,7 +361,8 @@ services:
       # :ro กัน container แก้ไฟล์ config โดยไม่ตั้งใจ
       - ./nginx/dev.conf:/etc/nginx/nginx.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost/nginx-health || exit 1"]
+      # ใช้ 127.0.0.1 เพราะ busybox wget resolve localhost → ::1 ก่อน — nginx listen 80 เฉพาะ IPv4 เลย refused
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/nginx-health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

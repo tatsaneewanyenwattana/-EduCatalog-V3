@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     log_level: str = Field(validation_alias="LOG_LEVEL")
     log_format: str = Field(validation_alias="LOG_FORMAT")
 
+    # --- Bootstrap admin — ใช้ `python -m scripts.seed_master` (รัน production ได้)
+    admin_email: str = Field(default="", validation_alias="ADMIN_EMAIL")
+    admin_password: str = Field(default="", validation_alias="ADMIN_PASSWORD")
+    # รหัส bcrypt ผู้ใช้ mock เท่านั้น (`seed_mock`) — แยกจากผู้ใช้จริงเพื่อตัดออกเมื่อมีข้อมูลโปรดักชัน
+    mock_users_password: str = Field(default="", validation_alias="MOCK_USERS_PASSWORD")
+
     @field_validator("debug", "minio_secure", mode="before")
     @classmethod
     def _coerce_bool(cls, v: object) -> bool:

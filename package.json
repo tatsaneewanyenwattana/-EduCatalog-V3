@@ -1,0 +1,15 @@
+{
+  "name": "educatalog-v3",
+  "private": true,
+  "description": "EduCatalog V3 — monorepo (backend/, frontend/). รัน npm ที่โฟลเดอร์ย่อย หรือใช้สคริปต์จาก root นี้",
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:host": "npm run dev:host --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "install:frontend": "npm install --prefix frontend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend",
+    "lint:frontend": "npm run lint --prefix frontend",
+    "typecheck:frontend": "npm run typecheck --prefix frontend"
+  }
+}

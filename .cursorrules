@@ -416,6 +416,87 @@ Dataset file pipeline:
 
 ---
 
+## DEPLOYMENT & ENVIRONMENT POLICY
+
+นโยบายแยก dev / prod / demo — เพื่อกันข้อมูลทดสอบเข้า production และกันเชื่อม DB ผิดตัว
+
+### Development Flow
+
+ระหว่างพัฒนา feature:
+
+- ใช้ Local Docker environment
+- ทดสอบบนเครื่อง developer
+- สามารถใช้ mock data ได้
+- database เป็น development database เท่านั้น
+- สามารถ reset database ได้
+
+### Demo / Feedback (ชั่วคราว)
+
+เมื่อต้องการ demo หรือรับ feedback:
+
+- เปิด Ngrok ชั่วคราว
+- ส่ง public URL ให้ tester ใช้งาน
+- ใช้ mock data ได้
+- ห้ามใช้ production database
+- ปิด Ngrok หลังเสร็จงาน
+
+### Production Go-Live Flow
+
+เมื่อ feature พร้อมใช้งานจริง:
+
+- deploy ผ่าน Railway
+- push code แล้ว deploy อัตโนมัติ
+- ใช้ production environment เท่านั้น
+- ใช้ production database แยกจาก development
+- URL ต้องคงที่
+
+### Environment Rules
+
+**development**
+
+อนุญาต:
+
+- mock data
+- fake users
+- seed test data
+- database reset
+- debug logs
+
+**production**
+
+ห้ามเด็ดขาด:
+
+- mock data
+- fake data
+- development seed
+- test users
+- overwrite production database ด้วย development database
+- debug-only endpoints
+
+production ต้องใช้:
+
+- real data only
+- separate production database
+- secure environment variables
+
+### Production Database Setup
+
+ขั้นตอนสร้าง production database:
+
+1. สร้าง PostgreSQL database ใหม่สำหรับ production
+2. ตั้ง ENV ให้ backend ชี้ไป production database
+3. run migrations เพื่อสร้าง schema
+4. รันเฉพาะ `seed_master` ถ้าจำเป็น
+5. เพิ่มข้อมูลจริงผ่านระบบจริงเท่านั้น
+
+ข้อสำคัญ:
+
+- ห้าม copy database จาก development ไป production
+- ห้ามนำ mock data เข้า production
+- ห้าม restore dump จาก dev environment มาทับ production
+
+---
+
 ## BRANCH STRATEGY
 
 main      ← production (auto deploy เมื่อ merge)
