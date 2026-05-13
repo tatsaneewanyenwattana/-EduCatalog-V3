@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* เฉดสีจากกฎ G — เดียวกับธีมราชการ/องค์กรการศึกษา (primary เขียวแอคเซ็นต์เหลือง) */
+  --color-primary: #006600;
+  --color-primary-dark: #004d00;
+  --color-primary-light: #e6f4e6;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #ffff00;
+  --color-accent-dark: #cccc00;
+  --color-text: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-border: #e2e8f0;
+  --color-error: #dc2626;
+  --color-warning: #ca8a04;
+  --color-success: #006600;
+
+  --color-footer-bg: #1e293b;
+  --color-footer-fg: #ffffff;
+  --color-footer-muted: #94a3b8;
+
+  /* Kanit เท่านั้น (กฎ G1) — โมโนสเปซสำรองเป็น Courier */
+  --font-sans: var(--font-kanit), "Kanit", sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  /* border-radius = 0 ทั้งระบบ (กฎ G3) */
+  --radius: 0px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --pad-btn-sm: 8px 14px;
+  --pad-btn: 10px 20px;
+  --pad-btn-lg: 14px 28px;
+  --pad-input: 10px 12px;
+  --pad-card: 16px;
+  --pad-card-lg: 24px;
+  --pad-modal: 24px;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  border-radius: 0px;
+  box-sizing: border-box;
+}
+
+body {
+  /* next/font สร้าง --font-kanit; ไม่ hardcode Google URL ใน CSS */
+  font-family: var(--font-kanit), "Kanit", sans-serif;
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-weight: 400;
+  font-size: var(--text-base);
+  line-height: 1.7;
+}
