@@ -24,11 +24,13 @@ WORKDIR /app
 # System packages
 #   gcc, libpq-dev  → compile asyncpg + cryptography
 #   curl            → ใช้ใน docker healthcheck (GET /health)
+#   procps (pgrep)  → celery_beat healthcheck ใน compose ตรวจว่า process ยังมี
 # -------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         libpq-dev \
         curl \
+        procps \
     && rm -rf /var/lib/apt/lists/*
 
 # -------------------------------------------------------
