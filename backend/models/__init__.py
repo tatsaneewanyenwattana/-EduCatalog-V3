@@ -15,7 +15,9 @@ from models.dataset_version import DatasetVersion, FileFormat, ScanStatus
 from models.download_log import DownloadLog
 from models.feature_flag import FeatureFlag
 from models.password_reset_token import PasswordResetToken
+from models.province import Province
 from models.quality_report import QualityReport
+from models.region import Region
 from models.user import User, UserRole, UserStatus
 
 __all__ = (
@@ -37,7 +39,9 @@ __all__ = (
     "FeatureFlag",
     "FileFormat",
     "PasswordResetToken",
+    "Province",
     "QualityReport",
+    "Region",
     "ScanStatus",
     "SoftDeleteMixin",
     "TimestampMixin",
